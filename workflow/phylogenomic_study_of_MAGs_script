@@ -1,0 +1,400 @@
+shell.executable("/bin/bash")
+shell.prefix("source /usr/local/genome/Anaconda3/etc/profile.d/conda.sh;")
+
+
+## Defining the final input file of the workflow (the output of the last step of the workflow)
+
+rule all:
+	input:
+		config['workdir'] + "/" + config['FastANI_full_matrix_subdirectory'] + "/" + config['ncbi_data_recovery']['taxon_id'] + "_" + config['FastANI_matrix']['Full_mat']
+		
+## Downloading and unzipping the genomic sequences of a species from the NCBI database
+
+rule ncbi_dataset_download:
+	output:
+		File_output = config['workdir'] + "/" + config['NCBI_dataset_download_Subdirectory'] + "/" + config['ncbi_data_recovery']['taxon_id'] + "_" + config['ncbi_data_recovery']['res'] + ".jsonl",
+		genomic_data_file_json = config['workdir'] + "/" + config['NCBI_dataset_download_Subdirectory'] + "/" + config['ncbi_data_recovery']['taxon_id'] + "_" + config['ncbi_data_recovery']['genomes_repertory'] + "/" + config['ncbi_data_recovery']['ncbi_dataset'] + "/" + config['ncbi_data_recovery']['data']  + "/" + config['ncbi_data_recovery']['res'] + ".jsonl"
+	params:
+		ncbi_datasets_version = config['ncbi_data_recovery']['ncbi_datasets_version'],
+		taxon_id = config['ncbi_data_recovery']['taxon_id'],
+		source = config['ncbi_data_recovery']['source'],
+		nomfichier = config['workdir'] + "/" + config['NCBI_dataset_download_Subdirectory'] + "/" + config['ncbi_data_recovery']['taxon_id'] + "_" + config['ncbi_data_recovery']['genomes_repertory'],
+		queue = "short.q"
+	log:
+		config['workdir'] + "/" + config['NCBI_dataset_download_Subdirectory'] + "/" + "ncbi_dataset.log"
+
+	shell:
+		" conda activate ncbi-datasets-cli-{params.ncbi_datasets_version} && "
+		" datasets download genome taxon {params.taxon_id} --filename {output.File_output} --assembly-source {params.source} && "
+		" unzip {output.File_output} -d {params.nomfichier} && "
+		" conda deactivate; "
+	
+
+
+## Formating the obtained JSON metadata file to a TSV file (columns separated by tabulations)
+
+rule ncbi_dataset_dataformat:
+	input:
+		genomic_data_file_json = config['workdir'] + "/" + config['NCBI_dataset_download_Subdirectory'] + "/" + config['ncbi_data_recovery']['taxon_id'] + "_" + config['ncbi_data_recovery']['genomes_repertory'] + "/" + config['ncbi_data_recovery']['ncbi_dataset'] + "/" + config['ncbi_data_recovery']['data']  + "/" + config['ncbi_data_recovery']['res'] + ".jsonl"
+	output:
+		genomic_data_file_full = config['workdir'] + "/" + config['NCBI_dataset_filtering_Subdirectory'] + "/" + config['ncbi_data_recovery']['taxon_id'] + "_" + config['ncbi_data_filtering']['complete_file'] + ".tsv"
+	params:
+		ncbi_datasets_version = config['ncbi_data_recovery']['ncbi_datasets_version'],
+		fields = config['ncbi_data_filtering']['fields'],
+		taxon_id = config['ncbi_data_recovery']['taxon_id'],
+		queue = "short.q"
+	log:
+		config['workdir'] + "/" + config['NCBI_dataset_filtering_Subdirectory'] + "/" + "ncbi_dataset_dataformat.log"
+
+	shell:
+		" conda activate ncbi-datasets-cli-{params.ncbi_datasets_version} &&  "
+		" dataformat tsv genome --inputfile {input.genomic_data_file_json} --force --fields {params.fields} > {output.genomic_data_file_full} && "
+		" conda deactivate; "
+	
+		
+
+## Formating the TSV file in order to obtain informations regarding the isolation source of the genomes.
+ 
+rule metadata_file_formating:
+	input:
+		genomic_data_file_full = config['workdir'] + "/" + config['NCBI_dataset_filtering_Subdirectory'] + "/" + config['ncbi_data_recovery']['taxon_id'] + "_" + config['ncbi_data_filtering']['complete_file'] + ".tsv"
+	output:
+		genomic_data_file_filtered = config['workdir'] + "/" + config['Metadata_formating_subdirectory'] + "/" + config['ncbi_data_recovery']['taxon_id'] + "_" + config['metadata_file_formating']['final_file'] + ".tsv"
+	params:
+		virtualEnv = config['environment'],
+		generate_data_script = config['metadata_file_formating']['generate_data_script'],
+		Genome_list = config['workdir'] + "/" + config['NCBI_dataset_download_Subdirectory'] + "/" + config['ncbi_data_recovery']['taxon_id'] + "_" + config['ncbi_data_recovery']['genomes_repertory'] + "/" + config['ncbi_data_recovery']['ncbi_dataset'] + "/" + config['ncbi_data_recovery']['data'],
+		repertoire = config['workdir'] + "/" + config['Genomes_list_subdirectory'],
+		queue = "short.q"
+	log:
+		config['workdir'] + "/" + config['Metadata_formating_subdirectory'] + "/" + "metadata_file_formating.log"
+
+	shell:
+		" source {params.virtualEnv}/bin/activate && "
+		" python {params.generate_data_script} -i {input.genomic_data_file_full} -o {output.genomic_data_file_filtered} && "
+		" mkdir {params.repertoire} && "
+		" find {params.Genome_list} -type f -name '*.fna' -exec ln -s {{}} {params.repertoire}/ \; "
+		
+		'''
+		  for file in {params.repertoire}/*.fna ; do 
+		      new_name=$(echo "$file" | sed 's/\./_/g')
+		      mv "$file" "$new_name"
+		  done
+		'''
+	
+## Verifying the quality of MAGs using checkM tool
+
+
+rule checkM_MAGs:
+	input:
+		genomic_data_file_filtered = config['workdir'] + "/" + config['Metadata_formating_subdirectory'] + "/" + config['ncbi_data_recovery']['taxon_id'] + "_" + config['metadata_file_formating']['final_file'] + ".tsv"
+	output:
+		File_output = config['workdir'] + "/" + config['checkM_subdirectory'] + "/" + config['checkM_launching']['output_file'] + ".tsv"
+	params:
+		checkM_version = config['checkM_launching']['checkM_version'],
+		threads = config['checkM_launching']['threads'],
+		MAGs_list = config['MAGs_dir'],
+		MAGs_repertory = config['workdir'] + "/" + config['MAGs_list_subdirectory'],
+		MAGs_to_use = config['workdir'] + "/" + config['MAGs_list_subdirectory'] + "/" + config['get_MAGs']['extension'],
+		extension = config['checkM_launching']['extension'],
+		repertory_dir = config['workdir'] + "/" + config['checkM_subdirectory'],
+		queue = "short.q"
+
+	shell:
+		" mkdir {params.MAGs_repertory} && "
+		" ln -s {params.MAGs_list} {params.MAGs_repertory} ; "
+		
+		'''
+		  for file in {params.MAGs_repertory}/*.fa ; do 
+		      new_name=$(echo "$file" | sed 's/\./_/g')
+		      mv "$file" "$new_name"
+		  done
+		'''
+		
+		" conda activate checkm2-{params.checkM_version} && checkm2 predict -i {params.MAGs_repertory}  -o {params.repertory_dir} -t {params.threads} -x {params.extension} && "
+		" conda deactivate; "  
+		
+	
+
+## Filtering MAGs based on their percent of contamination and completion
+
+
+rule filtering_MAGs:
+	input:
+		File_input = config['workdir'] + "/" + config['checkM_subdirectory'] + "/" + config['MAGs_filter']['input'] + ".tsv"
+	output:
+		File_output = config['workdir'] + "/" + config['MAGs_subdirectory'] + "/" + config['MAGs_filter']['final_file']
+	params:
+		my_virtualEnv = config['environment'],
+		filter_data_script = config['MAGs_filter']['filter_data_script'],
+		directory = config['workdir'] + "/" + config['MAGs_list_subdirectory'],
+		queue = "short.q"
+	log:
+		config['workdir'] + "/" + config['MAGs_subdirectory'] + "/" + "MAGs_formating.log"
+	shell:
+		" source {params.my_virtualEnv}/bin/activate && "
+		" python {params.filter_data_script} -i {input.File_input} -o {output.File_output} -d {params.directory} "
+		
+	
+## Launching the dRep tool
+
+rule dRep_launching:
+	input:
+		File_input = config['workdir'] + "/" + config['MAGs_subdirectory'] + "/" + config['MAGs_filter']['final_file']
+	output:
+		File_output = config['workdir'] + "/" + config['dRep_subdirectory'] + "/" + config['dRep_launching']['repertory'] + "/" + config['dRep_launching']['figures_repertory'] + "/" + config['dRep_launching']['Second_cluster'] + ".pdf"
+	params:
+		repertory = config['workdir'] + "/" + config['dRep_subdirectory'] + "/" + config['dRep_launching']['repertory'],
+		fasta_files = config['workdir'] + "/" + config['Genomes_list_subdirectory'] + "/" + config['dRep_launching']['extension'],
+		dRep_version = config['dRep_launching']['dRep_version'],
+		threads = config['dRep_launching']['threads'],
+		primary_cluster = config['dRep_launching']['primary_cluster'],
+		secondary_cluster = config['dRep_launching']['secondary_cluster'],
+		completion = config['dRep_launching']['completion'],
+		contamination = config['dRep_launching']['contamination'],
+		queue = "long.q"
+		
+	shell:
+		" conda activate drep-{params.dRep_version} && "
+		" dRep dereplicate {params.repertory} -g {params.fasta_files} -p {params.threads} -pa {params.primary_cluster} -sa {params.secondary_cluster} -comp {params.completion} -con {params.contamination} && "
+		" conda deactivate; "
+	
+
+## Generating the FastANI tool configuration file
+
+rule get_list_FastANI:
+	input:
+		File_input1 = config['workdir'] + "/" + config['dRep_subdirectory'] + "/" + config['dRep_launching']['repertory'] + "/" + config['dRep_launching']['figures_repertory'] + "/" + config['dRep_launching']['Second_cluster'] + ".pdf",
+		File_input2 = config['workdir'] + "/" + config['MAGs_subdirectory'] + "/" + config['MAGs_filter']['final_file']
+	output:
+		File_output = config['workdir'] + "/" + config['FastANI_get_list_subdirectory'] + "/" + config['ncbi_data_recovery']['taxon_id'] + "_" + config['FastANI_launching']['list_genomes']
+	threads:
+		1
+	log:
+		config['workdir'] + "/" + config['FastANI_get_list_subdirectory'] + "/" + "FastANI_get_list.log"
+	params:
+		path_genomes = config['workdir'] + "/" + config['dRep_subdirectory'] + "/" + config['dRep_launching']['repertory'] + "/" + config['dRep_launching']['dereplicated_genomes_repertory'],
+		path_MAGs = config['workdir'] + "/" + config['MAGs_list_subdirectory'] + "/" + config['FastANI_launching']['get_list_FastANI_extension'],
+		queue = "short.q"
+	shell:
+		'''
+        find {params.path_genomes} -type f | while read -r file; do
+            accession=$(basename "$file" | sed 's/\.[^.]*$//g')
+            echo -e "$file"
+        done > {output.File_output} 
+		ls {params.path_MAGs} >> {output.File_output}
+        '''
+	
+		
+## Launching the FastANI tool
+
+
+rule FastANI_launching:
+	input:
+		File_input = config['workdir'] + "/" + config['FastANI_get_list_subdirectory'] + "/" + config['ncbi_data_recovery']['taxon_id'] + "_" + config['FastANI_launching']['list_genomes']
+	output:
+		File_output = config['workdir'] + "/" + config['FastANI_subdirectory'] + "/" + config['ncbi_data_recovery']['taxon_id'] + "_" + config['FastANI_launching']['output_name'],
+		File_output2 = config['workdir'] + "/" + config['FastANI_subdirectory'] + "/" + config['ncbi_data_recovery']['taxon_id'] + "_" + config['FastANI_launching']['matrix_file']
+	params:
+		fastANI_version = config['FastANI_launching']['FastANI_version'],
+		threads = config['FastANI_launching']['threads'],
+		transpose = config['FastANI_launching']['t'],
+		queue = "long.q"
+	shell:
+		" conda activate fastani-{params.fastANI_version} && "
+		" fastANI --ql {input.File_input} --rl {input.File_input} --matrix -t {params.transpose} -o {output.File_output}  && "
+		" conda deactivate; "
+		
+
+		
+		
+## Generating the kSNP tool configuration file
+		
+		
+rule get_list_kSNP:
+	input:
+		File_input1 = config['workdir'] + "/" + config['FastANI_subdirectory'] + "/" + config['ncbi_data_recovery']['taxon_id'] + "_" + config['FastANI_launching']['output_name'],
+		File_input2 = config['workdir'] + "/" + config['MAGs_subdirectory'] + "/" + config['MAGs_filter']['final_file']
+
+	output:
+		File_output = config['workdir'] + "/" + config['kSNP_subdirectory'] + "/" + config['ncbi_data_recovery']['taxon_id'] + "_" + config['kSNP_preprocess']['list_kSNP']
+	threads:
+		1
+	params:
+		path_genomes = config['workdir'] + "/" + config['dRep_subdirectory'] + "/" + config['dRep_launching']['repertory'] + "/" + config['dRep_launching']['dereplicated_genomes_repertory'],
+		queue = "short.q"
+	shell:
+		'''
+        find {params.path_genomes} -type f | while read -r file; do
+            accession=$(basename "$file" | sed 's/\.[^.]*$//g' | cut -f1,2 -d "_")
+            echo -e "$file\t$accession"
+        done > {output.File_output}
+
+        cat {input.File_input2} >> {output.File_output}
+        '''
+        
+## Renaming assembly accessions for the FastANI output file
+
+
+rule rename_assemblies_FastANI_output:
+	input:
+		File_input1 = config['workdir'] + "/" + config['kSNP_subdirectory'] + "/" + config['ncbi_data_recovery']['taxon_id'] + "_" + config['kSNP_preprocess']['list_kSNP'],
+		File_input2 = config['workdir'] + "/" + config['FastANI_subdirectory'] + "/" + config['ncbi_data_recovery']['taxon_id'] + "_" + config['FastANI_launching']['output_name'],
+	
+	output:
+		File_output = config['workdir'] + "/" + config['FastANI_rename_subdirectory'] + "/" + config['ncbi_data_recovery']['taxon_id'] + "_" + config['FastANI_rename']['modified_file']
+	threads:
+		1
+	params:
+		queue = "short.q"
+	log:
+		config['workdir'] + "/" + config['FastANI_rename_subdirectory'] + "/" + "FastANI_file_rename.log"
+	shell:
+		'''
+		cp {input.File_input2} {output.File_output} 
+		for L in $(cut -f1 {output.File_output} | sort -u); do echo $L; P=$(basename "$L");echo "P:"$P ; if [[ $P == GCA_* ]]; then C=`echo $P | cut -f1,2 -d "_"`;sed -i "s#$L#$C#g" {output.File_output}; elif [[ $P == GCF_* ]]; then C=`echo $P | cut -f1,2 -d "_"`; sed -i "s#$L#$C#g" {output.File_output}; else P=`echo $P | sed 's/_fa$//'`;sed -i "s#$L#$P#g" {output.File_output};fi; done
+		'''
+		
+	
+		
+
+## Filtring outliers (genomes with an ANI percent less than a threshold) from the FastANI tool output file
+
+
+rule filter_outliers_from_FastANI_file:
+	input: 
+		Extra_file = config['workdir'] + "/" + config['FastANI_rename_subdirectory'] + "/" + config['ncbi_data_recovery']['taxon_id'] + "_" + config['FastANI_rename']['modified_file'],
+		File_input = config['workdir'] + "/" + config['FastANI_subdirectory'] + "/" + config['ncbi_data_recovery']['taxon_id'] + "_" + config['FastANI_launching']['output_name']
+	output:
+		File_output = config['workdir'] + "/" + config['Filter_outliers_subdirectory'] + "/" + config['ncbi_data_recovery']['taxon_id'] + "_" + config['filter_outliers']['file_name'],
+		File_output2 = config['workdir'] + "/" + config['Filter_outliers_subdirectory'] + "/" + config['ncbi_data_recovery']['taxon_id'] + "_" + config['filter_outliers']['missing_data_outliers']
+	threads:
+		1
+	params:
+		my_virtualEnv = config['environment'],
+		filter_outliers_script = config['filter_outliers']['filter_outliers_script'],
+		filter_missing_data_outliers_script = config['filter_outliers']['filter_missing_data_outliers_script'],
+		reference_genome = config['filter_outliers']['reference_genome'],
+		ANI_threshold = config['filter_outliers']['ANI_threshold'],
+		queue = "short.q"
+	shell:
+		" source {params.my_virtualEnv}/bin/activate && "
+		" python {params.filter_outliers_script} -i {input.Extra_file} -g {params.reference_genome} -t {params.ANI_threshold} -o {output.File_output} && "
+		" python {params.filter_missing_data_outliers_script} -i {input.Extra_file} -o {output.File_output2} && "
+		" cat {output.File_output2} >> {output.File_output} "		
+		
+		
+## Removing the different outliers found from the kSNP configuration file
+
+
+
+rule remove_outliers_from_FastANI_file:
+	input:
+		Outliers_file = config['workdir'] + "/" + config['Filter_outliers_subdirectory'] + "/" + config['ncbi_data_recovery']['taxon_id'] + "_" + config['filter_outliers']['file_name'],
+		kSNP_config_file = config['workdir'] + "/" + config['kSNP_subdirectory'] + "/" + config['ncbi_data_recovery']['taxon_id'] + "_" + config['kSNP_preprocess']['list_kSNP']
+	output:
+		File_output = config['workdir'] + "/" + config['Remove_outliers_subdirectory'] + "/" + config['ncbi_data_recovery']['taxon_id'] + "_" + config['remove_outliers']['list_name']
+	threads:
+		1
+	params:
+		my_virtualEnv = config['environment'],
+		remove_outliers_script = config['remove_outliers']['remove_outliers_script'],
+		queue = "short.q"
+	shell:
+		" source {params.my_virtualEnv}/bin/activate && "
+		" python {params.remove_outliers_script} -i {input.Outliers_file} -m {input.kSNP_config_file} -o {output.File_output} "
+       
+## Launching the first pre-processing step of kSNP : Makefasta
+
+
+rule kSNP_Makefasta:
+	input:
+		Ordering_file = config['workdir'] + "/" + config['Remove_outliers_subdirectory'] + "/" + config['ncbi_data_recovery']['taxon_id'] + "_" + config['remove_outliers']['list_name'],
+		File_input = config['workdir'] + "/" + config['kSNP_subdirectory'] + "/" + config['ncbi_data_recovery']['taxon_id'] + "_" + config['kSNP_preprocess']['list_kSNP']
+	output:
+		File_output = config['workdir'] + "/" + config['kSNP_Makefasta_subdirectory'] + "/" +  config['Preprocess_step_one']['list_fasta']
+	threads:
+		1
+	params:
+		ksnp_version = config['Preprocess_step_one']['ksnp_version'],
+		queue = "short.q"
+	shell:
+		"conda activate ksnp-{params.ksnp_version} &&  MakeFasta {input.File_input} {output.File_output}  && conda deactivate"
+		
+		
+## Launching the second pre-processing step of kSNP : KChooser
+
+rule kSNP_KChooser:
+	input:
+		File_input = config['workdir'] + "/" + config['kSNP_Makefasta_subdirectory'] + "/" +  config['Preprocess_step_one']['list_fasta']
+	output:
+		File_output = config['workdir'] + "/" + config['kSNP_kchooser_subdirectory'] + "/" +  config['Preprocess_step_two']['K_report']
+	threads:
+		1
+	params:
+		ksnp_version = config['Preprocess_step_one']['ksnp_version'],
+		repertory = config['workdir'] + "/" + config['kSNP_kchooser_subdirectory'],
+		Kchooserdir = config['Kchooserdir'],
+		queue = "short.q"
+	shell:
+		" conda activate ksnp-{params.ksnp_version} && "
+		" cd {params.repertory} && "
+		" Kchooser {input.File_input}  && "
+		" cd {params.Kchooserdir} && "
+		" conda deactivate;"
+		
+		
+		
+## Launching the kSNP tool
+
+
+rule kSNP_launching:
+	input:
+		Kchooser_report = config['workdir'] + "/" + config['kSNP_kchooser_subdirectory'] + "/" +  config['Preprocess_step_two']['K_report'],
+		all_genomes = config['workdir'] + "/" + config['Remove_outliers_subdirectory'] + "/" + config['ncbi_data_recovery']['taxon_id'] + "_" + config['remove_outliers']['list_name']
+	output:
+		File_output = config['workdir'] + "/" + config['KSNP_launching_subdirectory'] + "/" +  config['kSNP_elements']['tree_file']
+	params:
+		ksnp_version = config['Preprocess_step_one']['ksnp_version'],
+		threads = config['kSNP_elements']['threads'],
+		result = config['workdir'] + "/" + config['KSNP_launching_subdirectory'],
+		queue = "long.q"
+	log:
+		config['workdir'] + "/" + config['KSNP_launching_subdirectory'] + "/" + "kSNP_results.log"
+	shell:
+		" optimal_k=`grep -oE 'The optimum value of K is ([0-9]+)' {input.Kchooser_report} | grep -oE '[0-9]+'` && "
+		" echo 'Optimal K :' $optimal_k && "
+		" conda activate ksnp-{params.ksnp_version} && "
+		" kSNP3 -in {input.all_genomes} -k $optimal_k -outdir {params.result} -ML -CPU {params.threads} && conda deactivate"
+
+
+		
+## Generating the full matrix of fastANI
+
+
+rule FastANI_full_matrix:
+	input:
+		Extra_file = config['workdir'] + "/" + config['KSNP_launching_subdirectory'] + "/" +  config['kSNP_elements']['tree_file'],
+		File_input = config['workdir'] + "/" + config['FastANI_rename_subdirectory'] + "/" + config['ncbi_data_recovery']['taxon_id'] + "_" + config['FastANI_rename']['modified_file']
+	output:
+		File_output = config['workdir'] + "/" + config['FastANI_full_matrix_subdirectory'] + "/" + config['ncbi_data_recovery']['taxon_id'] + "_" + config['FastANI_matrix']['Full_mat']
+	threads:
+		1
+	log:
+		config['workdir'] + "/" + config['FastANI_full_matrix_subdirectory'] + "FastANI_matrix_generation.log"
+	params:
+		newick_file = config['workdir'] + "/" + config['KSNP_launching_subdirectory'] + "/" + config['kSNP_elements']['tree_file'],
+		my_virtualEnv = config['environment'],
+		Generate_matrix_full_script = config['FastANI_matrix']['Generate_matrix_full_script'],
+		queue = "short.q"
+	shell:
+		" source {params.my_virtualEnv}/bin/activate && "
+		" python {params.Generate_matrix_full_script} -i {input.File_input} -o {output.File_output} -n {params.newick_file} "
+
+
+
+
+
+
+
+

@@ -1,0 +1,157 @@
+
+## The set of variables defining each rule and the associated parameters within :
+ncbi_data_recovery:
+  ncbi_datasets_version: "14.20.0"
+  taxon_id: "1252"
+  suffix: "ncbi_dataset"
+  source: "Genbank"
+  genomes_repertory: "all_NCBI_genomes"
+  res: "assembly_data_report"
+  ncbi_dataset: "ncbi_dataset"
+  data: "data"
+
+  
+
+ncbi_data_filtering:
+  fields: "accession,source_database,assminfo-assembly-method,assmstats-genome-coverage,assmstats-total-number-of-chromosomes,assmstats-number-of-scaffolds,assmstats-scaffold-n50,checkm-completeness,checkm-contamination,assminfo-biosample-accession,assminfo-biosample-description-organism-common-name,assminfo-biosample-description-organism-infraspecific-strain,organism-infraspecific-isolate,organism-infraspecific-strain,assminfo-biosample-attribute-name,assminfo-biosample-attribute-value,assminfo-biosample-owner-name,assminfo-submitter,wgs-project-accession"
+  complete_file: "genomic_data_full"
+
+  
+  
+ 
+metadata_file_formating:
+  generate_data_script: "/home/ayouncha/save/MesScripts/generateGenomic_MetaData_From_NCBI_Dataset.py"
+  final_file: "genomic_data_final"
+
+
+ 
+
+get_MAGs:
+  extension: "*.fa"
+
+dRep_launching:
+  dRep_version: "3.2.2"
+  repertory: "dRep_Results_0_99999"
+  figures_repertory: "figures"
+  dereplicated_genomes_repertory: "dereplicated_genomes"
+  Second_cluster: "Secondary_clustering_dendrograms"
+  extension: "*_fna"
+  threads: "32"
+  primary_cluster: "0.95"
+  secondary_cluster: "0.99999"
+  completion: "80"
+  contamination: "5"
+
+
+FastANI_launching:
+  get_list_FastANI_extension: "*_fa"
+  FastANI_version: "1.32"
+  list_genomes: "genomes_pathway_list"
+  output_name: "FastANI_results"
+  matrix_file: "FastANI_results.matrix"
+  threads: "20"
+  t: "20"
+
+  
+checkM_launching:
+  checkM_version: "0.1.3"
+  extension: "fa"
+  threads: "20"
+  output_file: "quality_report"
+
+MAGs_filter:
+  Dirname: "quality_report.tsv"
+  input: "quality_report"
+  file_name: "MAGs_filtered.tsv"
+  final_file: "MAGs_filtered_final.tsv"
+  filter_data_script: "/save_home/ayouncha/MesScripts/keep_high_quality_MAGs.py"
+
+kSNP_preprocess:
+  list_kSNP: "configuration_file_kSNP"
+ 
+Preprocess_step_one:
+  list_fasta: "fasta_file"
+  ksnp_version: "3.1"
+  
+Preprocess_step_two:
+  K_report: "Kchooser.report"
+  K_value: "Kchooser_K_value"
+ 
+
+kSNP_elements:
+  tree_file: "tree.ML.tre"
+  threads: "20"
+  
+FastANI_rename:
+  modified_file: "fasta_final"
+  
+FastANI_matrix:
+  Full_mat: "fasta_matrix_full"
+  Generate_matrix_full_script: "/save_home/ayouncha/MesScripts/fastani_matrix_full.py"
+
+
+filter_outliers:
+  file_name: "genome_outliers"
+  missing_data_outliers: "missing_data_outliers"
+  filter_outliers_script: "/save_home/ayouncha/MesScripts/filter_outliers_from_FastANI_matrix.py"
+  filter_missing_data_outliers_script: "/save_home/ayouncha/MesScripts/filter_missing_data_from_fastani_file.py"
+  reference_genome: "GCA_007954525"
+  ANI_threshold: "95.00"
+  
+remove_outliers:
+  remove_outliers_script: "/save_home/ayouncha/MesScripts/remove_outliers_from_kSNP_config_file.py"
+  list_name: "configuration_file_kSNP_final"
+ 
+
+  
+## the current directory used for all the analysis :
+
+workdir: "/home/ayouncha/work/genomesV2/Snakemake/run_leuconostoc_carnosum_test"
+
+Kchooserdir: "/work_home/ayouncha/genomesV2/Snakemake/"
+
+MAGs_dir: "/work_projet/metapdocheese/METAG/LACTIC_BACTERIA/Leuconostoc_carnosum/MAGS_MetaPDOCheese/*.fa"
+
+## The environment on which Python will be activated :
+
+environment: "/save_home/ayouncha/Venv/"
+
+## Subdirectories associated to each step of the workflow :
+
+NCBI_dataset_download_Subdirectory: "ncbi_data"
+
+NCBI_dataset_filtering_Subdirectory: "data_filtering"
+
+Metadata_formating_subdirectory: "data_formating"
+
+Genomes_list_subdirectory: "Genomes_list"
+
+MAGs_list_subdirectory: "MAGs_list"
+
+dRep_subdirectory: "dRep"
+
+FastANI_subdirectory: "FastANI"
+
+checkM_subdirectory: "checkM"
+
+MAGs_subdirectory: "MAGs_filtering"
+
+kSNP_subdirectory: "kSNP"
+
+kSNP_Makefasta_subdirectory: "Makefasta"
+
+kSNP_kchooser_subdirectory: "KChooser"
+
+KSNP_launching_subdirectory: "kSNP_results"
+
+FastANI_get_list_subdirectory: "FastANI_get_list"
+
+FastANI_rename_subdirectory: "FastANI_FileRename"
+
+FastANI_full_matrix_subdirectory: "FastANI_Matrix_Full"
+
+Filter_outliers_subdirectory: "Filter_outliers"
+
+Remove_outliers_subdirectory: "Remove_outliers"
+
+
